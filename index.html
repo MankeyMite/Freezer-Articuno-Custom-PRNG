@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Articuno PRNG Freezer Generator</title>
+  <style>
+    :root {
+      --bg: #f7f7f8;
+      --card: #ffffff;
+      --text: #151515;
+      --muted: #666;
+      --line: #ddd;
+      --accent: #111;
+      --soft: #f0f0f2;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.45;
+    }
+
+    main {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    h1 { margin: 0 0 8px; font-size: 1.8rem; }
+    h2 { margin: 0 0 12px; font-size: 1.15rem; }
+    p { margin: 0 0 12px; color: var(--muted); }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+      margin-top: 18px;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.04);
+    }
+
+    label {
+      display: block;
+      font-weight: 650;
+      margin: 12px 0 6px;
+    }
+
+    input, select, textarea, button {
+      font: inherit;
+      width: 100%;
+    }
+
+    input, select, textarea {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+      background: #fff;
+      color: var(--text);
+    }
+
+    textarea {
+      min-height: 160px;
+      resize: vertical;
+      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      font-size: 0.9rem;
+      white-space: pre;
+    }
+
+    button {
+      border: 0;
+      border-radius: 10px;
+      padding: 10px 12px;
+      cursor: pointer;
+      background: var(--accent);
+      color: white;
+      font-weight: 700;
+      margin-top: 10px;
+    }
+
+    button.secondary {
+      background: var(--soft);
+      color: var(--text);
+      border: 1px solid var(--line);
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .small { font-size: 0.9rem; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; }
+
+    .result-line {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      border-bottom: 1px solid var(--line);
+      padding: 8px 0;
+    }
+
+    .result-line:last-child { border-bottom: 0; }
+    .result-line span:first-child { color: var(--muted); }
+
+    .warning {
+      background: #fff7d6;
+      border: 1px solid #ecd37b;
+      color: #4d3d00;
+      border-radius: 12px;
+      padding: 12px;
+      margin-top: 12px;
+    }
+
+
+    .raw-hex {
+      min-height: 330px;
+    }
+
+    .box-text {
+      min-height: 330px;
+      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0.02em;
+      line-height: 1.55;
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Articuno PRNG Freezer Generator</h1>
+  <p>
+    Generates the raw 80-byte Articuno payload and 14 WELDR/Base64 box names for E-Sh4rk's Freezer setup.
+    This version loads any 32-bit frozen seed from a literal, writes it to Emerald's PRNG state at
+    <span class="mono">0x03005D80</span>, then returns with <span class="mono">bx r0</span>.
+  </p>
+  <p class="small">
+    Original Freezer code by E-Sh4rk. Articuno PRNG seed payload modified by MankeyMite.
+  </p>
+
+  <div class="grid">
+    <section class="card">
+      <h2>Input</h2>
+
+      <label for="mode">Target type</label>
+      <select id="mode">
+        <option value="frame">PKHeX/PokeFinder frame</option>
+        <option value="origin">Origin seed</option>
+      </select>
+
+      <label for="target">Target value</label>
+      <input id="target" value="99" placeholder="Example: 99 or 0x4EE9ACCA" />
+      <p class="small">
+        Decimal values can be typed normally. Hex values should use <span class="mono">0x</span>.
+      </p>
+
+      <label for="delay">RNG advances from frozen seed to origin seed</label>
+      <input id="delay" type="number" min="0" step="1" value="1" />
+      <p class="small">
+        Based on the static encounter test, <span class="mono">1</span> gives
+        frozen seed → one advance → reported Origin Seed. If another method has a consistent offset,
+        adjust this value.
+      </p>
+
+      <button id="generate">Generate Articuno</button>
+    </section>
+
+    <section class="card">
+      <h2>Calculated values</h2>
+      <div class="result-line"><span>Origin seed</span><strong id="originSeed" class="mono">—</strong></div>
+      <div class="result-line"><span>Frozen seed</span><strong id="frozenSeed" class="mono">—</strong></div>
+      <div class="result-line"><span>Frozen seed bytes</span><strong id="seedBytes" class="mono">—</strong></div>
+      <div class="result-line"><span>Base64 length</span><strong id="b64Length" class="mono">—</strong></div>
+      <p class="small" style="margin-top:12px;">
+        The frozen seed is inserted at offset <span class="mono">0x18</span> as little-endian bytes.
+      </p>
+    </section>
+  </div>
+
+  <div class="grid">
+    <section class="card">
+      <h2>Raw 80-byte Articuno hex</h2>
+      <textarea id="rawHex" class="raw-hex" readonly></textarea>
+      <button class="secondary" data-copy="rawHex">Copy raw hex</button>
+    </section>
+
+    <section class="card">
+      <h2>14 Base64 box names</h2>
+      <textarea id="boxText" class="box-text" readonly></textarea>
+      <button class="secondary" data-copy="boxText">Copy box names</button>
+    </section>
+  </div>
+
+  <section class="card" style="margin-top:16px;">
+    <h2>Payload template used</h2>
+    <p class="small">
+      ARM code at the start of the Articuno:
+    </p>
+    <pre class="mono small">ldr r12, [pc, #12]   ; loads 0x03005D80
+ldr r11, [pc, #12]   ; loads frozen seed literal from offset 0x18
+str r11, [r12]!
+bx  r0
+.word 0x02000000
+.word 0x03005D80
+.word FROZEN_SEED</pre>
+  </section>
+</main>
+
+<script>
+(() => {
+  const MOD = 0x100000000n;
+  const MASK = 0xFFFFFFFFn;
+  const A = 0x41C64E6Dn;
+  const C = 0x6073n;
+  const A_INV = 0xEEB9EB65n;
+  const C_INV = ((-C * A_INV) & MASK);
+
+  const els = {
+    mode: document.getElementById('mode'),
+    target: document.getElementById('target'),
+    delay: document.getElementById('delay'),
+    generate: document.getElementById('generate'),
+    originSeed: document.getElementById('originSeed'),
+    frozenSeed: document.getElementById('frozenSeed'),
+    seedBytes: document.getElementById('seedBytes'),
+    b64Length: document.getElementById('b64Length'),
+    rawHex: document.getElementById('rawHex'),
+    boxText: document.getElementById('boxText'),
+  };
+
+  // 80-byte Articuno payload. Bytes 0x18-0x1B are replaced with the frozen seed.
+  // This template preserves a valid Articuno under the changed OTID/instruction word 0xE59FB00C.
+  const TEMPLATE = [
+    0x0C,0xC0,0x9F,0xE5, 0x0C,0xB0,0x9F,0xE5,
+    0x00,0xB0,0xAC,0xE5, 0x10,0xFF,0x2F,0xE1,
+    0x00,0x00,0x00,0x02, 0x80,0x5D,0x00,0x03,
+    0x00,0x00,0x00,0x00, 0xBD,0x9C,0x00,0x00,
+
+    0x90,0x70,0x3F,0x06, 0x0C,0x00,0x3F,0x06,
+    0x0C,0x00,0x3F,0x06, 0x0C,0x00,0x3F,0x06,
+    0x0C,0x00,0x3F,0x06, 0x0C,0x00,0x3F,0x06,
+    0x0C,0x00,0x3F,0x06, 0x0C,0x00,0x3F,0x06,
+    0x00,0xE8,0x00,0x5F, 0x0C,0x00,0x3F,0x06,
+    0x0C,0x00,0x3F,0x06, 0x0C,0x00,0x3F,0x06,
+  ];
+
+  function parseNumber(input) {
+    const s = input.trim().replace(/_/g, '');
+    if (!s) throw new Error('Please enter a target value.');
+    if (/^0x[0-9a-f]+$/i.test(s)) return BigInt(s);
+    if (/^[0-9]+$/.test(s)) return BigInt(s);
+    if (/^[0-9a-f]+$/i.test(s)) {
+      throw new Error('Hex values need a 0x prefix, for example 0x4EE9ACCA.');
+    }
+    throw new Error('Invalid number format.');
+  }
+
+  function u32(x) { return x & MASK; }
+
+  function jump(seed, steps, mul = A, add = C) {
+    let accMul = 1n;
+    let accAdd = 0n;
+    let curMul = mul & MASK;
+    let curAdd = add & MASK;
+    let n = BigInt(steps);
+
+    while (n > 0n) {
+      if (n & 1n) {
+        accAdd = u32(curMul * accAdd + curAdd);
+        accMul = u32(curMul * accMul);
+      }
+      curAdd = u32(curMul * curAdd + curAdd);
+      curMul = u32(curMul * curMul);
+      n >>= 1n;
+    }
+
+    return u32(accMul * seed + accAdd);
+  }
+
+  function stepBack(seed, steps) {
+    return jump(seed, steps, A_INV, C_INV);
+  }
+
+  function seedAtDisplayedFrame(frame) {
+    // PKHeX/PokeFinder-style convention observed in testing:
+    // frame 99 corresponds to normal Emerald RNG state after 98 advances from seed 0.
+    if (frame < 1n) throw new Error('Frame must be 1 or higher.');
+    return jump(0n, frame - 1n);
+  }
+
+  function toHex8(n) {
+    return '0x' + u32(n).toString(16).toUpperCase().padStart(8, '0');
+  }
+
+  function littleEndianBytes(n) {
+    const v = Number(u32(n));
+    return [v & 0xFF, (v >>> 8) & 0xFF, (v >>> 16) & 0xFF, (v >>> 24) & 0xFF];
+  }
+
+  function hexByte(b) {
+    return b.toString(16).toUpperCase().padStart(2, '0');
+  }
+
+  function formatRawHex(bytes) {
+    const lines = [];
+    for (let i = 0; i < bytes.length; i += 8) {
+      const left = bytes.slice(i, i + 4).map(hexByte).join(' ');
+      const right = bytes.slice(i + 4, i + 8).map(hexByte).join(' ');
+      lines.push(`${left}   ${right}`);
+    }
+    return lines.join('\n');
+  }
+
+  function base64BoxNames(bytes80) {
+    // WELDR-style Base64 output. Older versions padded the 80-byte input to 84 bytes,
+    // making Box 14 end with unnecessary A's. Newer versions can stop after the first
+    // three characters of Box 14.
+    const padded = bytes80.concat([0, 0, 0, 0]);
+    let binary = '';
+    for (const b of padded) binary += String.fromCharCode(b);
+    const standard = btoa(binary);
+    const welder = standard.replace(/\+/g, '!').replace(/\//g, '?');
+    const boxes = [];
+    for (let i = 0; i < 14; i++) {
+      let box = welder.slice(i * 8, i * 8 + 8);
+      if (i === 13) box = box.slice(0, 3);
+      boxes.push(box);
+    }
+    return boxes;
+  }
+
+  function buildArticuno(frozenSeed) {
+    const bytes = TEMPLATE.slice();
+    const le = littleEndianBytes(frozenSeed);
+    bytes[0x18] = le[0];
+    bytes[0x19] = le[1];
+    bytes[0x1A] = le[2];
+    bytes[0x1B] = le[3];
+    return bytes;
+  }
+
+  function calculate() {
+    const mode = els.mode.value;
+    const target = parseNumber(els.target.value);
+    const delay = BigInt(parseInt(els.delay.value || '0', 10));
+    if (delay < 0n) throw new Error('Delay must be 0 or higher.');
+
+    let originSeed;
+    let frozenSeed;
+
+    if (mode === 'frame') {
+      originSeed = seedAtDisplayedFrame(target);
+      const originAdvanceIndex = target - 1n;
+      if (originAdvanceIndex < delay) {
+        throw new Error('Frame is too early for this delay. Lower the delay or choose a later frame.');
+      }
+      frozenSeed = jump(0n, originAdvanceIndex - delay);
+    } else if (mode === 'origin') {
+      originSeed = u32(target);
+      frozenSeed = stepBack(originSeed, delay);
+    }
+
+    const bytes = buildArticuno(frozenSeed);
+    const boxes = base64BoxNames(bytes);
+    const le = littleEndianBytes(frozenSeed).map(hexByte).join(' ');
+
+    els.originSeed.textContent = toHex8(originSeed);
+    els.frozenSeed.textContent = toHex8(frozenSeed);
+    els.seedBytes.textContent = le;
+    els.rawHex.value = formatRawHex(bytes);
+    els.b64Length.textContent = String(boxes.join('').length);
+
+    els.boxText.value = boxes.map((box, i) => `Box ${String(i + 1).padStart(2, ' ')}: ${box}`).join('\n');
+  }
+
+  function safeCalculate() {
+    try {
+      calculate();
+    } catch (err) {
+      alert(err.message || String(err));
+    }
+  }
+
+  els.generate.addEventListener('click', safeCalculate);
+
+  document.querySelectorAll('[data-copy]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.getAttribute('data-copy');
+      const target = document.getElementById(id);
+      await navigator.clipboard.writeText(target.value);
+      const old = btn.textContent;
+      btn.textContent = 'Copied!';
+      setTimeout(() => btn.textContent = old, 900);
+    });
+  });
+
+  safeCalculate();
+})();
+</script>
+</body>
+</html>
